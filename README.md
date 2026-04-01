@@ -2,7 +2,7 @@
 
 Read data from a Buderus Logamatic 4000 series heating controller via serial interface and publish to MQTT. ESP32 firmware for the [Olimex ESP32-POE-ISO-IND](https://www.olimex.com/Products/IoT/ESP32/ESP32-POE-ISO/open-source-hardware).
 
-Based on [l4000-daemon.pl](https://www.holzleitner.com/el/buderus-monitor/index-de.html) v2.0 by Peter G. Holzleitner, ported from [buderus2mqtt](../buderus2mqtt/) (Python).
+Based on [l4000-daemon.pl](https://www.holzleitner.com/el/buderus-monitor/index-de.html) v2.0 by Peter G. Holzleitner, ported from [buderus2mqtt](https://c0d3.sh/andre/buderus2mqtt) (Python).
 
 ## Hardware
 
