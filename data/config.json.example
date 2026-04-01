@@ -1,0 +1,9 @@
+{
+    "mqtt_host": "127.1.0.1",
+    "mqtt_port": 1883,
+    "mqtt_user": "buderus2mqtt",
+    "mqtt_password": "secret",
+    "mqtt_topic": "bus/buderus",
+    "mqtt_clientid": "buderus2mqtt",
+    "mqtt_keepalive": 30
+}
