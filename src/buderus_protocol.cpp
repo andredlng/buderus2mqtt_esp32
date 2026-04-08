@@ -141,7 +141,13 @@ void BuderusProtocol::processBuffer() {
                 memcpy(recbuf_, payload, 6);
                 recbuf_len_ = 6;
             } else {
-                if (recbuf_len_ > 0 && recbuf_len_ + 6 <= sizeof(recbuf_)) {
+                if (recnum != lastrec_) {
+                    // Record type changed without payofs=0 (lost frame).
+                    // Emit accumulated record (likely complete) and reset
+                    // to prevent hybrid records with mixed data.
+                    emitRecord();
+                    recbuf_len_ = 0;
+                } else if (recbuf_len_ > 0 && recbuf_len_ + 6 <= sizeof(recbuf_)) {
                     memcpy(recbuf_ + recbuf_len_, payload, 6);
                     recbuf_len_ += 6;
                 }

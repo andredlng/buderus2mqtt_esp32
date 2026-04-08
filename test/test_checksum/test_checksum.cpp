@@ -88,6 +88,53 @@ void test_protocol_record_assembly() {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, got_data, 18);
 }
 
+void test_no_hybrid_record_on_lost_payofs0() {
+    // Simulate: 2 chunks of zone 0x81, then boiler 0x88 chunk with payofs=6
+    // (as if boiler's payofs=0 frame was lost), then zone 0x82 payofs=0 to trigger emission.
+    // Bug: without the fix, boiler chunks get appended to zone data, creating a hybrid record.
+
+    uint8_t stream[] = {
+        // Zone 0x81 chunk 0 (payofs=0)
+        0x81, 0x00, 0x04, 0x02, 0x28, 0x28, 0x2A, 0x29, 0x59, 0xAF, 0x82,
+        // Zone 0x81 chunk 1 (payofs=6)
+        0x81, 0x06, 0x00, 0x00, 0x64, 0x02, 0x80, 0x00, 0xD0, 0xAF, 0x82,
+        // Boiler 0x88 chunk 1 (payofs=6) - simulates lost payofs=0
+        0x88, 0x06, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x6F, 0xAF, 0x82,
+        // Zone 0x82 chunk 0 (payofs=0) - triggers emission
+        0x82, 0x00, 0x04, 0x02, 0x19, 0x19, 0x26, 0x6E, 0x9C, 0xAF, 0x82,
+    };
+
+    uint8_t recnums[8] = {};
+    size_t reclens[8] = {};
+    int call_count = 0;
+
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onRecord([&](uint8_t recnum, const uint8_t* data, size_t len) {
+        if (call_count < 8) {
+            recnums[call_count] = recnum;
+            reclens[call_count] = len;
+        }
+        call_count++;
+    });
+
+    proto.feedBytes(stream, sizeof(stream));
+
+    // Trace with fix:
+    // 1. Zone 0x81 chunk 0 (payofs=0): emitRecord no-op, start recbuf_, lastrec_=0x81
+    // 2. Zone 0x81 chunk 1 (payofs=6): append, recbuf_len_=12
+    // 3. Boiler 0x88 (payofs=6): recnum!=lastrec_ -> emitRecord(zone 0x81, 12 bytes), reset
+    // 4. Zone 0x82 (payofs=0): emitRecord no-op (recbuf_len_==0), start new record
+    TEST_ASSERT_EQUAL(1, call_count);
+    TEST_ASSERT_EQUAL_HEX8(0x81, recnums[0]);
+    TEST_ASSERT_EQUAL(12, reclens[0]);
+
+    // Critical: no record with recnum=0x88 was emitted (no hybrid)
+    for (int i = 0; i < call_count; i++) {
+        TEST_ASSERT_NOT_EQUAL_HEX8(0x88, recnums[i]);
+    }
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_known_block_zone2);
@@ -97,5 +144,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_known_block_zone3_cont);
     RUN_TEST(test_all_zeros);
     RUN_TEST(test_protocol_record_assembly);
+    RUN_TEST(test_no_hybrid_record_on_lost_payofs0);
     return UNITY_END();
 }
