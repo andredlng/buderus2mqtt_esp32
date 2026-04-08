@@ -180,10 +180,26 @@ size_t BuderusDecoder::decodeBoiler(const uint8_t* data, size_t len, MqttMessage
     if (data[34] & 0x20) appendErr("Betriebsartschalter: AUS");
     if (data[34] & 0x40) appendErr("Betriebsartschalter: MANUELL");
 
+    // Operating status from byte 7
+    int betrieb = (data[7] & 0x08) ? 1 : 0;
+    int stufe1  = (data[7] & 0x02) ? 1 : 0;
+    int stufe2  = (data[7] & 0x40) ? 1 : 0;
+
+    // Operating mode from byte 34
+    char modus[64] = "";
+    if (data[34] & 0x02) strlcat(modus, "0", sizeof(modus));
+    else if (data[34] & 0x04) strlcat(modus, "Auto", sizeof(modus));
+    else if (data[34] & 0x08) strlcat(modus, "1", sizeof(modus));
+    else if (data[34] & 0x10) strlcat(modus, "2", sizeof(modus));
+
     size_t n = 0;
     n = addMsgInt(out, n, max_out, "kessel", ki);
     n = addMsgInt(out, n, max_out, "kessel_s", ks);
     n = addMsgInt(out, n, max_out, "brenner", br);
+    n = addMsgInt(out, n, max_out, "brenner_betrieb", betrieb);
+    n = addMsgInt(out, n, max_out, "brenner_stufe1", stufe1);
+    n = addMsgInt(out, n, max_out, "brenner_stufe2", stufe2);
+    n = addMsg(out, n, max_out, "brenner_modus", modus);
     n = addMsgInt(out, n, max_out, "k_ein", k1);
     n = addMsgInt(out, n, max_out, "k_aus", k0);
     n = addMsg(out, n, max_out, "kessel_err", err);

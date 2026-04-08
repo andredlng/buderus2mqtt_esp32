@@ -185,8 +185,23 @@ void test_boiler_basic_publish() {
     TEST_ASSERT_EQUAL_STRING("65", findValue(msgs, n, "kessel"));
     TEST_ASSERT_EQUAL_STRING("70", findValue(msgs, n, "kessel_s"));
     TEST_ASSERT_EQUAL_STRING("80", findValue(msgs, n, "brenner"));
+    TEST_ASSERT_EQUAL_STRING("0", findValue(msgs, n, "brenner_betrieb"));
     TEST_ASSERT_EQUAL_STRING("60", findValue(msgs, n, "k_ein"));
     TEST_ASSERT_EQUAL_STRING("55", findValue(msgs, n, "k_aus"));
+}
+
+void test_boiler_status_fields() {
+    uint8_t rec[42] = {};
+    rec[0] = 70; rec[1] = 65; rec[7] = 0x0A; // Stufe 1 (0x02) + Betrieb (0x08)
+    rec[34] = 0x04; // Brenner=Auto
+    MqttMessage msgs[16];
+
+    size_t n = BuderusDecoder::decodeBoiler(rec, 42, msgs, 16, 0);
+
+    TEST_ASSERT_EQUAL_STRING("1", findValue(msgs, n, "brenner_betrieb"));
+    TEST_ASSERT_EQUAL_STRING("1", findValue(msgs, n, "brenner_stufe1"));
+    TEST_ASSERT_EQUAL_STRING("0", findValue(msgs, n, "brenner_stufe2"));
+    TEST_ASSERT_EQUAL_STRING("Auto", findValue(msgs, n, "brenner_modus"));
 }
 
 void test_boiler_odd_run_no_publish() {
@@ -378,6 +393,7 @@ int main(int argc, char** argv) {
 
     // Boiler tests
     RUN_TEST(test_boiler_basic_publish);
+    RUN_TEST(test_boiler_status_fields);
     RUN_TEST(test_boiler_odd_run_no_publish);
     RUN_TEST(test_boiler_error_flags);
 
