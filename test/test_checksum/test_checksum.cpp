@@ -148,9 +148,8 @@ static size_t appendFrame(uint8_t* stream, size_t pos, uint8_t recnum, uint8_t p
 }
 
 void test_marker_bytes_inside_payload() {
-    // A payload containing 0xAF 0x02 / 0xAF 0x82 (e.g. a runtime counter) must not
-    // be mistaken for a frame marker. If the counter stops changing (burner off),
-    // the whole record would otherwise be dropped on every cycle.
+    // Marker-like bytes that do not end a checksum-valid frame must not split it.
+    // Unstuffed data can't contain them on the real bus; this guards against line noise.
     uint8_t expected[42];
     for (size_t i = 0; i < sizeof(expected); i++) expected[i] = (uint8_t)(i + 1);
     expected[13] = 0xAF;
@@ -188,6 +187,132 @@ void test_marker_bytes_inside_payload() {
     TEST_ASSERT_EQUAL_HEX8(0x88, got_recnum);
     TEST_ASSERT_EQUAL(42, got_len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, got_data, 42);
+}
+
+// The controller inserts 0x00 after every 0xAF inside a frame (byte stuffing).
+static size_t appendStuffedFrame(uint8_t* stream, size_t pos, uint8_t recnum, uint8_t payofs, const uint8_t* payload) {
+    uint8_t f[11];
+    appendFrame(f, 0, recnum, payofs, payload);
+    for (size_t i = 0; i < 9; i++) {
+        stream[pos++] = f[i];
+        if (f[i] == 0xAF) stream[pos++] = 0x00;
+    }
+    stream[pos++] = 0xAF;
+    stream[pos++] = 0x82;
+    return pos;
+}
+
+// Boiler record captured from the bus: the 0x0c frame's checksum is 0xAF, sent as "af 00".
+static const uint8_t captured_boiler[42] = {
+    0x23, 0x44, 0x1c, 0x2a, 0x15, 0x88,
+    0x00, 0x00, 0x00, 0xff, 0x00, 0x00,
+    0x17, 0x33, 0x05, 0x00, 0x00, 0x05,
+    0x04, 0x27, 0x36, 0x00, 0x00, 0x00,
+    0x1e, 0x64, 0x9c, 0x00, 0x44, 0x6e,
+    0xcd, 0x43, 0x00, 0x00, 0x04, 0x00,
+    0x00, 0x00, 0x6e, 0x6e, 0x6e, 0x00,
+};
+
+static size_t buildCapturedBoilerStream(uint8_t* stream) {
+    size_t pos = 0;
+    for (uint8_t ofs = 0; ofs < 42; ofs += 6) {
+        pos = appendStuffedFrame(stream, pos, 0x88, ofs, captured_boiler + ofs);
+    }
+    const uint8_t zeros[6] = {};
+    return appendFrame(stream, pos, 0x80, 0x00, zeros);
+}
+
+void test_stuffed_checksum_byte() {
+    uint8_t stream[11 * 8 + 8];
+    size_t len = buildCapturedBoilerStream(stream);
+    const uint8_t wire_0c[] = {0x88, 0x0c, 0x17, 0x33, 0x05, 0x00, 0x00, 0x05, 0xaf, 0x00, 0xaf, 0x82};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(wire_0c, stream + 22, sizeof(wire_0c));
+
+    uint8_t got_data[64] = {};
+    size_t got_len = 0;
+    int calls = 0;
+    int discards = 0;
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onRecord([&](uint8_t recnum, const uint8_t* data, size_t n) {
+        if (recnum == 0x88) { got_len = n; memcpy(got_data, data, n); }
+        calls++;
+    });
+    proto.onDiscard([&](const uint8_t*, size_t, size_t, uint8_t, uint8_t, size_t) { discards++; });
+
+    proto.feedBytes(stream, len);
+
+    TEST_ASSERT_EQUAL(1, calls);
+    TEST_ASSERT_EQUAL(42, got_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(captured_boiler, got_data, 42);
+    TEST_ASSERT_EQUAL(0, discards);
+}
+
+void test_stuffing_split_across_reads() {
+    uint8_t stream[11 * 8 + 8];
+    size_t len = buildCapturedBoilerStream(stream);
+
+    uint8_t got_data[64] = {};
+    size_t got_len = 0;
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onRecord([&](uint8_t recnum, const uint8_t* data, size_t n) {
+        if (recnum == 0x88) { got_len = n; memcpy(got_data, data, n); }
+    });
+
+    for (size_t i = 0; i < len; i++) proto.feedBytes(stream + i, 1);
+
+    TEST_ASSERT_EQUAL(42, got_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(captured_boiler, got_data, 42);
+}
+
+void test_stuffed_af_followed_by_data_zero() {
+    // Payload "af 00" is sent as "af 00 00": only the first 0x00 is stuffing.
+    const uint8_t payload[6] = {0xAF, 0x00, 0x01, 0x02, 0x03, 0x04};
+    uint8_t stream[32];
+    size_t pos = appendStuffedFrame(stream, 0, 0x84, 0x00, payload);
+    const uint8_t zeros[6] = {};
+    pos = appendFrame(stream, pos, 0x80, 0x00, zeros);
+
+    uint8_t got_data[16] = {};
+    size_t got_len = 0;
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onRecord([&](uint8_t recnum, const uint8_t* data, size_t n) {
+        if (recnum == 0x84) { got_len = n; memcpy(got_data, data, n); }
+    });
+    proto.feedBytes(stream, pos);
+
+    TEST_ASSERT_EQUAL(6, got_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(payload, got_data, 6);
+}
+
+void test_perl_89_18_exception_is_a_stuffed_frame() {
+    // "89 18 01 af 00 de 00 00 00 ed af 82" from l4000-daemon.pl continues the config record.
+    const uint8_t zeros[6] = {};
+    uint8_t stream[11 * 6 + 1];
+    size_t pos = 0;
+    for (uint8_t ofs = 0; ofs < 0x18; ofs += 6) pos = appendFrame(stream, pos, 0x89, ofs, zeros);
+    const uint8_t wire[] = {0x89, 0x18, 0x01, 0xaf, 0x00, 0xde, 0x00, 0x00, 0x00, 0xed, 0xaf, 0x82};
+    memcpy(stream + pos, wire, sizeof(wire));
+    pos += sizeof(wire);
+    pos = appendFrame(stream, pos, 0x8a, 0x00, zeros);
+
+    uint8_t got_data[64] = {};
+    size_t got_len = 0;
+    int calls = 0;
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onRecord([&](uint8_t recnum, const uint8_t* data, size_t n) {
+        if (recnum == 0x89) { got_len = n; memcpy(got_data, data, n); }
+        calls++;
+    });
+    proto.feedBytes(stream, pos);
+
+    TEST_ASSERT_EQUAL(1, calls);
+    TEST_ASSERT_EQUAL(30, got_len);
+    const uint8_t tail[] = {0x01, 0xaf, 0xde, 0x00, 0x00, 0x00};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(tail, got_data + 24, 6);
 }
 
 struct DiscardReport {
@@ -270,5 +395,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_marker_bytes_inside_payload);
     RUN_TEST(test_discarded_bytes_are_reported);
     RUN_TEST(test_clean_stream_reports_no_discards);
+    RUN_TEST(test_stuffed_checksum_byte);
+    RUN_TEST(test_stuffing_split_across_reads);
+    RUN_TEST(test_stuffed_af_followed_by_data_zero);
+    RUN_TEST(test_perl_89_18_exception_is_a_stuffed_frame);
     return UNITY_END();
 }

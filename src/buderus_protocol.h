@@ -43,6 +43,7 @@ private:
     uint8_t recbuf_[256];
     size_t recbuf_len_ = 0;
     uint8_t lastrec_ = 0;
+    bool prev_af_ = false;
 
     uint8_t junk_[64];
     size_t junk_len_ = 0;

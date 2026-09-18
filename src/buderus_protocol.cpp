@@ -12,6 +12,7 @@ void BuderusProtocol::begin(
     buf_len_ = 0;
     recbuf_len_ = 0;
     lastrec_ = 0;
+    prev_af_ = false;
     junk_len_ = 0;
     junk_total_ = 0;
 }
@@ -35,21 +36,20 @@ uint8_t BuderusProtocol::checksum(const uint8_t* block) {
 }
 
 void BuderusProtocol::feedBytes(const uint8_t* data, size_t len) {
-    size_t space = MAX_BUF - buf_len_;
-    if (len > space) {
-        // Shift buffer to make room, keeping most recent data
-        size_t keep = MAX_BUF - len;
-        if (keep < MAX_BUF && keep > 0) {
-            memmove(buf_, buf_ + (buf_len_ - keep), keep);
-            buf_len_ = keep;
-        } else {
-            buf_len_ = 0;
+    for (size_t i = 0; i < len; i++) {
+        uint8_t b = data[i];
+        // The controller stuffs 0x00 after every 0xAF inside a frame, so data
+        // never looks like an 0xAF 0x82 / 0xAF 0x02 end marker.
+        if (prev_af_ && b == 0x00) {
+            prev_af_ = false;
+            continue;
         }
-        space = MAX_BUF - buf_len_;
-        if (len > space) len = space;
+        prev_af_ = (b == 0xAF);
+
+        // processBuffer() leaves at most 10 bytes, so this always makes room.
+        if (buf_len_ == MAX_BUF) processBuffer();
+        buf_[buf_len_++] = b;
     }
-    memcpy(buf_ + buf_len_, data, len);
-    buf_len_ += len;
 
     processBuffer();
 }
@@ -83,9 +83,9 @@ void BuderusProtocol::emitRecord() {
     }
 }
 
-// Find the first 0xAF 0x82 / 0xAF 0x02 marker preceded by a checksum-valid frame.
-// Payload bytes can contain the marker sequence (e.g. runtime counters), so a
-// marker alone is not enough to delimit a frame. Returns index of 0xAF or -1.
+// Find the first 0xAF 0x82 / 0xAF 0x02 marker preceded by a checksum-valid frame,
+// so corrupted bytes before a marker can't shift frame boundaries.
+// Returns index of 0xAF or -1.
 static int findFrameMarker(const uint8_t* buf, size_t len, bool* alt_marker) {
     for (size_t i = 9; i + 1 < len; i++) {
         if (buf[i] != 0xAF || (buf[i + 1] != 0x82 && buf[i + 1] != 0x02)) continue;
@@ -101,16 +101,6 @@ void BuderusProtocol::processBuffer() {
     while (true) {
         bool alt_marker = false;
         int be = findFrameMarker(buf_, buf_len_, &alt_marker);
-
-        // Handle protocol exception: 0x89 0x18 with extra bytes
-        if (be >= 0 && (be == 9 || be == 10) && buf_len_ >= 2 && buf_[0] == 0x89 && buf_[1] == 0x18) {
-            // Skip the 0x89 0x18 prefix
-            size_t skip = 2;
-            addJunk(buf_, skip);
-            memmove(buf_, buf_ + skip, buf_len_ - skip);
-            buf_len_ -= skip;
-            continue;
-        }
 
         if (be < 0) {
             // A frame completed by future bytes needs at most the last 10 bytes here.
@@ -137,8 +127,7 @@ void BuderusProtocol::processBuffer() {
         junk_len_ = 0;
         junk_total_ = 0;
 
-        // New record or alt marker or 0x89/0x18 exception
-        if (payofs == 0 || alt_marker || (recnum == 0x89 && payofs == 0x18)) {
+        if (payofs == 0 || alt_marker) {
             emitRecord();
             memcpy(recbuf_, payload, 6);
             recbuf_len_ = 6;
