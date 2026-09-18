@@ -118,10 +118,10 @@ void BuderusProtocol::processBuffer() {
         const uint8_t* payload = subblock + 2; // 6 bytes
 
         if (be > 9) addJunk(buf_, be - 9);
-        // A lone trailing marker byte of the previous frame is expected, not junk.
-        bool only_marker_tail = junk_total_ == 1 && (junk_[0] == 0x82 || junk_[0] == 0x02);
-        if (junk_total_ > 0 && !only_marker_tail && discard_cb_) {
-            size_t expected_ofs = (recnum == lastrec_) ? recbuf_len_ : 0;
+        // Only report discards that lost a frame (payload offset gap). The controller
+        // sends a short non-frame block at the end of each cycle, which is harmless.
+        size_t expected_ofs = (recnum == lastrec_) ? recbuf_len_ : 0;
+        if (junk_total_ > 1 && payofs != expected_ofs && discard_cb_) {
             discard_cb_(junk_, junk_len_, junk_total_, recnum, payofs, expected_ofs);
         }
         junk_len_ = 0;

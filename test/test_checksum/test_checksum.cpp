@@ -382,6 +382,29 @@ void test_clean_stream_reports_no_discards() {
     TEST_ASSERT_EQUAL(0, count);
 }
 
+void test_end_of_cycle_block_is_not_reported() {
+    // Captured before zone 1 on every cycle: "af 82 a0 a4 af 82" after a frame ending in "af 02".
+    const uint8_t zeros[6] = {};
+    uint8_t stream[64];
+    size_t pos = appendFrame(stream, 0, 0x9e, 0x00, zeros);
+    stream[pos - 1] = 0x02;
+    const uint8_t block[] = {0xaf, 0x82, 0xa0, 0xa4, 0xaf, 0x82};
+    memcpy(stream + pos, block, sizeof(block));
+    pos += sizeof(block);
+    pos = appendFrame(stream, pos, 0x80, 0x00, zeros);
+
+    int discards = 0;
+    int records = 0;
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onRecord([&](uint8_t, const uint8_t*, size_t) { records++; });
+    proto.onDiscard([&](const uint8_t*, size_t, size_t, uint8_t, uint8_t, size_t) { discards++; });
+    proto.feedBytes(stream, pos);
+
+    TEST_ASSERT_EQUAL(1, records);
+    TEST_ASSERT_EQUAL(0, discards);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_known_block_zone2);
@@ -395,6 +418,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_marker_bytes_inside_payload);
     RUN_TEST(test_discarded_bytes_are_reported);
     RUN_TEST(test_clean_stream_reports_no_discards);
+    RUN_TEST(test_end_of_cycle_block_is_not_reported);
     RUN_TEST(test_stuffed_checksum_byte);
     RUN_TEST(test_stuffing_split_across_reads);
     RUN_TEST(test_stuffed_af_followed_by_data_zero);
