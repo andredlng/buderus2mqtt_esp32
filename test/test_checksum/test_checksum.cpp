@@ -1,5 +1,6 @@
 #include <unity.h>
 #include "buderus_protocol.h"
+#include <cstring>
 
 void test_known_block_zone2() {
     // Sample from Perl source: 81 00 04 02 28 28 2a 29 59
@@ -135,6 +136,60 @@ void test_no_hybrid_record_on_lost_payofs0() {
     }
 }
 
+static size_t appendFrame(uint8_t* stream, size_t pos, uint8_t recnum, uint8_t payofs, const uint8_t* payload) {
+    uint8_t* f = stream + pos;
+    f[0] = recnum;
+    f[1] = payofs;
+    memcpy(f + 2, payload, 6);
+    f[8] = BuderusProtocol::checksum(f);
+    f[9] = 0xAF;
+    f[10] = 0x82;
+    return pos + 11;
+}
+
+void test_marker_bytes_inside_payload() {
+    // A payload containing 0xAF 0x02 / 0xAF 0x82 (e.g. a runtime counter) must not
+    // be mistaken for a frame marker. If the counter stops changing (burner off),
+    // the whole record would otherwise be dropped on every cycle.
+    uint8_t expected[42];
+    for (size_t i = 0; i < sizeof(expected); i++) expected[i] = (uint8_t)(i + 1);
+    expected[13] = 0xAF;
+    expected[14] = 0x02;
+    expected[26] = 0xAF;
+    expected[27] = 0x82;
+
+    uint8_t stream[11 * 8];
+    size_t pos = 0;
+    for (uint8_t ofs = 0; ofs < 42; ofs += 6) {
+        pos = appendFrame(stream, pos, 0x88, ofs, expected + ofs);
+    }
+    const uint8_t trigger[] = {0x04, 0x02, 0x19, 0x19, 0x26, 0x6E};
+    pos = appendFrame(stream, pos, 0x82, 0x00, trigger);
+
+    uint8_t got_recnum = 0;
+    uint8_t got_data[64] = {};
+    size_t got_len = 0;
+    int call_count = 0;
+
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onRecord([&](uint8_t recnum, const uint8_t* data, size_t len) {
+        if (call_count == 0) {
+            got_recnum = recnum;
+            got_len = len;
+            memcpy(got_data, data, len < sizeof(got_data) ? len : sizeof(got_data));
+        }
+        call_count++;
+    });
+
+    proto.feedBytes(stream, pos);
+
+    TEST_ASSERT_EQUAL(1, call_count);
+    TEST_ASSERT_EQUAL_HEX8(0x88, got_recnum);
+    TEST_ASSERT_EQUAL(42, got_len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, got_data, 42);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_known_block_zone2);
@@ -145,5 +200,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_all_zeros);
     RUN_TEST(test_protocol_record_assembly);
     RUN_TEST(test_no_hybrid_record_on_lost_payofs0);
+    RUN_TEST(test_marker_bytes_inside_payload);
     return UNITY_END();
 }

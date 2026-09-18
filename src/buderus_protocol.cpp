@@ -74,38 +74,24 @@ void BuderusProtocol::emitRecord() {
     }
 }
 
-// Find 0xAF 0x82 or 0xAF 0x02 in buffer. Returns index of 0xAF or -1.
-static int findMarker(const uint8_t* buf, size_t len, bool* alt_marker) {
-    int be = -1;
-    int be2 = -1;
-
-    for (size_t i = 0; i + 1 < len; i++) {
-        if (buf[i] == 0xAF && buf[i + 1] == 0x82) {
-            if (be < 0) be = (int)i;
-            break;
-        }
+// Find the first 0xAF 0x82 / 0xAF 0x02 marker preceded by a checksum-valid frame.
+// Payload bytes can contain the marker sequence (e.g. runtime counters), so a
+// marker alone is not enough to delimit a frame. Returns index of 0xAF or -1.
+static int findFrameMarker(const uint8_t* buf, size_t len, bool* alt_marker) {
+    for (size_t i = 9; i + 1 < len; i++) {
+        if (buf[i] != 0xAF || (buf[i + 1] != 0x82 && buf[i + 1] != 0x02)) continue;
+        const uint8_t* subblock = buf + i - 9;
+        if (BuderusProtocol::checksum(subblock) != subblock[8]) continue;
+        *alt_marker = (buf[i + 1] == 0x02);
+        return (int)i;
     }
-    for (size_t i = 0; i + 1 < len; i++) {
-        if (buf[i] == 0xAF && buf[i + 1] == 0x02) {
-            if (be2 < 0) be2 = (int)i;
-            break;
-        }
-    }
-
-    if (be < 0 && be2 >= 0) {
-        be = be2;
-    } else if (be >= 0 && be2 >= 0 && be2 < be) {
-        be = be2;
-    }
-
-    *alt_marker = (be >= 0 && be == be2);
-    return be;
+    return -1;
 }
 
 void BuderusProtocol::processBuffer() {
     while (true) {
         bool alt_marker = false;
-        int be = findMarker(buf_, buf_len_, &alt_marker);
+        int be = findFrameMarker(buf_, buf_len_, &alt_marker);
 
         // Handle protocol exception: 0x89 0x18 with extra bytes
         if (be >= 0 && (be == 9 || be == 10) && buf_len_ >= 2 && buf_[0] == 0x89 && buf_[1] == 0x18) {
@@ -116,55 +102,43 @@ void BuderusProtocol::processBuffer() {
             continue;
         }
 
-        if (be < 0) break;
-
-        if (be >= 9) {
-            const uint8_t* subblock = buf_ + be - 9;
-
-            // Verify checksum
-            uint8_t cs = checksum(subblock);
-            if (cs != subblock[8]) {
-                // Checksum error, skip past this marker
-                size_t skip = be + 1;
-                memmove(buf_, buf_ + skip, buf_len_ - skip);
-                buf_len_ -= skip;
-                continue;
+        if (be < 0) {
+            // A frame completed by future bytes needs at most the last 10 bytes here.
+            if (buf_len_ > 10) {
+                memmove(buf_, buf_ + buf_len_ - 10, 10);
+                buf_len_ = 10;
             }
-
-            uint8_t recnum = subblock[0];
-            uint8_t payofs = subblock[1];
-            const uint8_t* payload = subblock + 2; // 6 bytes
-
-            // New record or alt marker or 0x89/0x18 exception
-            if (payofs == 0 || alt_marker || (recnum == 0x89 && payofs == 0x18)) {
-                emitRecord();
-                memcpy(recbuf_, payload, 6);
-                recbuf_len_ = 6;
-            } else {
-                if (recnum != lastrec_) {
-                    // Record type changed without payofs=0 (lost frame).
-                    // Emit accumulated record (likely complete) and reset
-                    // to prevent hybrid records with mixed data.
-                    emitRecord();
-                    recbuf_len_ = 0;
-                } else if (recbuf_len_ > 0 && recbuf_len_ + 6 <= sizeof(recbuf_)) {
-                    memcpy(recbuf_ + recbuf_len_, payload, 6);
-                    recbuf_len_ += 6;
-                }
-            }
-
-            lastrec_ = recnum;
-
-            // Consume up to marker position + 1 (keep marker's second byte for next scan)
-            size_t skip = be + 1;
-            memmove(buf_, buf_ + skip, buf_len_ - skip);
-            buf_len_ -= skip;
-        } else {
-            // Not enough data before marker, discard
-            size_t skip = be + 2;
-            if (skip > buf_len_) skip = buf_len_;
-            memmove(buf_, buf_ + skip, buf_len_ - skip);
-            buf_len_ -= skip;
+            break;
         }
+
+        const uint8_t* subblock = buf_ + be - 9;
+        uint8_t recnum = subblock[0];
+        uint8_t payofs = subblock[1];
+        const uint8_t* payload = subblock + 2; // 6 bytes
+
+        // New record or alt marker or 0x89/0x18 exception
+        if (payofs == 0 || alt_marker || (recnum == 0x89 && payofs == 0x18)) {
+            emitRecord();
+            memcpy(recbuf_, payload, 6);
+            recbuf_len_ = 6;
+        } else {
+            if (recnum != lastrec_) {
+                // Record type changed without payofs=0 (lost frame).
+                // Emit accumulated record (likely complete) and reset
+                // to prevent hybrid records with mixed data.
+                emitRecord();
+                recbuf_len_ = 0;
+            } else if (recbuf_len_ > 0 && recbuf_len_ + 6 <= sizeof(recbuf_)) {
+                memcpy(recbuf_ + recbuf_len_, payload, 6);
+                recbuf_len_ += 6;
+            }
+        }
+
+        lastrec_ = recnum;
+
+        // Consume up to marker position + 1 (keep marker's second byte for next scan)
+        size_t skip = be + 1;
+        memmove(buf_, buf_ + skip, buf_len_ - skip);
+        buf_len_ -= skip;
     }
 }
