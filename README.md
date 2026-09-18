@@ -80,7 +80,7 @@ All values are published under `{mqtt_topic}/{key}`:
 | `sol_err` | Solar error |
 | `diag_reclen_err` | Last record rejected for its length, with its data as hex, e.g. `rec=88 len=36 expected=42 data=…` |
 | `diag_reclen_count` | Number of records rejected for their length since boot |
-| `diag_discard` | Serial bytes skipped before a valid frame (e.g. a corrupt frame), with the next frame's `recnum:payofs` and the payload offset the record expected |
+| `diag_discard_{recnum}` | Serial bytes last skipped before a frame of record `recnum` (e.g. a corrupt frame), with that frame's `recnum:payofs` and the payload offset the record expected |
 
 ## Tests
 

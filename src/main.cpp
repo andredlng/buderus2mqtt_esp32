@@ -90,7 +90,9 @@ void setup() {
         for (size_t i = 0; i < len && pos + 3 <= (int)sizeof(val); i++) {
             pos += snprintf(val + pos, sizeof(val) - pos, "%02x", data[i]);
         }
-        mqtt.publish("diag_discard", val);
+        char key[24];
+        snprintf(key, sizeof(key), "diag_discard_%02x", recnum);
+        mqtt.publish(key, val);
     });
 
 #if ESP_IDF_VERSION_MAJOR >= 5
