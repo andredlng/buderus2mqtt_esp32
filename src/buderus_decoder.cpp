@@ -46,9 +46,12 @@ size_t BuderusDecoder::dispatch(uint8_t recnum, const uint8_t* data, size_t len,
     int expected = expectedRecLen(recnum);
     if (expected != 0 && !reclenCheck(expected, len)) {
         reclen_errors_++;
-        char val[48];
-        snprintf(val, sizeof(val), "rec=%02x len=%u %s=%d",
-                 recnum, (unsigned)len, expected < 0 ? "min" : "expected", expected < 0 ? -expected : expected);
+        char val[sizeof(out[0].value)];
+        int pos = snprintf(val, sizeof(val), "rec=%02x len=%u %s=%d data=",
+                           recnum, (unsigned)len, expected < 0 ? "min" : "expected", expected < 0 ? -expected : expected);
+        for (size_t i = 0; i < len && pos + 3 <= (int)sizeof(val); i++) {
+            pos += snprintf(val + pos, sizeof(val) - pos, "%02x", data[i]);
+        }
         size_t n = 0;
         n = addMsg(out, n, max_out, "diag_reclen_err", val);
         char cnt[16];

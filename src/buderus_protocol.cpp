@@ -12,6 +12,8 @@ void BuderusProtocol::begin(
     buf_len_ = 0;
     recbuf_len_ = 0;
     lastrec_ = 0;
+    junk_len_ = 0;
+    junk_total_ = 0;
 }
 
 uint8_t BuderusProtocol::checksum(const uint8_t* block) {
@@ -68,6 +70,13 @@ void BuderusProtocol::loop() {
 #endif
 }
 
+void BuderusProtocol::addJunk(const uint8_t* data, size_t len) {
+    size_t n = len < sizeof(junk_) - junk_len_ ? len : sizeof(junk_) - junk_len_;
+    memcpy(junk_ + junk_len_, data, n);
+    junk_len_ += n;
+    junk_total_ += len;
+}
+
 void BuderusProtocol::emitRecord() {
     if (lastrec_ && recbuf_len_ > 0 && callback_) {
         callback_(lastrec_, recbuf_, recbuf_len_);
@@ -97,6 +106,7 @@ void BuderusProtocol::processBuffer() {
         if (be >= 0 && (be == 9 || be == 10) && buf_len_ >= 2 && buf_[0] == 0x89 && buf_[1] == 0x18) {
             // Skip the 0x89 0x18 prefix
             size_t skip = 2;
+            addJunk(buf_, skip);
             memmove(buf_, buf_ + skip, buf_len_ - skip);
             buf_len_ -= skip;
             continue;
@@ -105,6 +115,7 @@ void BuderusProtocol::processBuffer() {
         if (be < 0) {
             // A frame completed by future bytes needs at most the last 10 bytes here.
             if (buf_len_ > 10) {
+                addJunk(buf_, buf_len_ - 10);
                 memmove(buf_, buf_ + buf_len_ - 10, 10);
                 buf_len_ = 10;
             }
@@ -115,6 +126,16 @@ void BuderusProtocol::processBuffer() {
         uint8_t recnum = subblock[0];
         uint8_t payofs = subblock[1];
         const uint8_t* payload = subblock + 2; // 6 bytes
+
+        if (be > 9) addJunk(buf_, be - 9);
+        // A lone trailing marker byte of the previous frame is expected, not junk.
+        bool only_marker_tail = junk_total_ == 1 && (junk_[0] == 0x82 || junk_[0] == 0x02);
+        if (junk_total_ > 0 && !only_marker_tail && discard_cb_) {
+            size_t expected_ofs = (recnum == lastrec_) ? recbuf_len_ : 0;
+            discard_cb_(junk_, junk_len_, junk_total_, recnum, payofs, expected_ofs);
+        }
+        junk_len_ = 0;
+        junk_total_ = 0;
 
         // New record or alt marker or 0x89/0x18 exception
         if (payofs == 0 || alt_marker || (recnum == 0x89 && payofs == 0x18)) {

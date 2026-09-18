@@ -190,6 +190,73 @@ void test_marker_bytes_inside_payload() {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, got_data, 42);
 }
 
+struct DiscardReport {
+    uint8_t data[64];
+    size_t len;
+    size_t total;
+    uint8_t recnum;
+    uint8_t payofs;
+    size_t expected_ofs;
+};
+
+void test_discarded_bytes_are_reported() {
+    uint8_t zeros[6] = {};
+    uint8_t stream[11 * 4];
+    size_t pos = 0;
+    pos = appendFrame(stream, pos, 0x88, 0x00, zeros);
+    pos = appendFrame(stream, pos, 0x88, 0x06, zeros);
+    stream[pos - 11 + 4] ^= 0xFF; // corrupt second frame
+    pos = appendFrame(stream, pos, 0x88, 0x0C, zeros);
+
+    DiscardReport reports[4] = {};
+    int count = 0;
+
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onDiscard([&](const uint8_t* data, size_t len, size_t total,
+                        uint8_t recnum, uint8_t payofs, size_t expected_ofs) {
+        if (count < 4) {
+            memcpy(reports[count].data, data, len);
+            reports[count].len = len;
+            reports[count].total = total;
+            reports[count].recnum = recnum;
+            reports[count].payofs = payofs;
+            reports[count].expected_ofs = expected_ofs;
+        }
+        count++;
+    });
+
+    proto.feedBytes(stream, pos);
+
+    TEST_ASSERT_EQUAL(1, count);
+    // Trailing 0x82 of frame 1 plus the whole corrupt frame
+    TEST_ASSERT_EQUAL(12, reports[0].total);
+    TEST_ASSERT_EQUAL(12, reports[0].len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(stream + 10, reports[0].data, 12);
+    TEST_ASSERT_EQUAL_HEX8(0x88, reports[0].recnum);
+    TEST_ASSERT_EQUAL_HEX8(0x0C, reports[0].payofs);
+    TEST_ASSERT_EQUAL(6, reports[0].expected_ofs);
+}
+
+void test_clean_stream_reports_no_discards() {
+    uint8_t zeros[6] = {};
+    uint8_t stream[11 * 3];
+    size_t pos = 0;
+    pos = appendFrame(stream, pos, 0x88, 0x00, zeros);
+    pos = appendFrame(stream, pos, 0x88, 0x06, zeros);
+    pos = appendFrame(stream, pos, 0x82, 0x00, zeros);
+
+    int count = 0;
+    BuderusProtocol proto;
+    proto.begin();
+    proto.onDiscard([&](const uint8_t*, size_t, size_t, uint8_t, uint8_t, size_t) { count++; });
+
+    // Byte-wise feeding exercises the trim path between frames
+    for (size_t i = 0; i < pos; i++) proto.feedBytes(stream + i, 1);
+
+    TEST_ASSERT_EQUAL(0, count);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_known_block_zone2);
@@ -201,5 +268,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_protocol_record_assembly);
     RUN_TEST(test_no_hybrid_record_on_lost_payofs0);
     RUN_TEST(test_marker_bytes_inside_payload);
+    RUN_TEST(test_discarded_bytes_are_reported);
+    RUN_TEST(test_clean_stream_reports_no_discards);
     return UNITY_END();
 }

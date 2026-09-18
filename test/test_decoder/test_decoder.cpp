@@ -395,16 +395,19 @@ void test_solar_error_flags() {
 void test_dispatch_reports_wrong_record_length() {
     BuderusDecoder decoder;
     uint8_t rec[30] = {};
+    rec[0] = 0xAB; rec[29] = 0x01;
     MqttMessage msgs[16];
 
     size_t n = decoder.dispatch(0x88, rec, 30, msgs, 16);
     TEST_ASSERT_EQUAL(2, n);
-    TEST_ASSERT_EQUAL_STRING("rec=88 len=30 expected=42", findValue(msgs, n, "diag_reclen_err"));
+    TEST_ASSERT_EQUAL_STRING("rec=88 len=30 expected=42 data=ab"
+                             "0000000000000000000000000000000000000000000000000000000001",
+                             findValue(msgs, n, "diag_reclen_err"));
     TEST_ASSERT_EQUAL_STRING("1", findValue(msgs, n, "diag_reclen_count"));
     TEST_ASSERT_FALSE(hasKey(msgs, n, "kessel"));
 
     n = decoder.dispatch(0x89, rec, 6, msgs, 16);
-    TEST_ASSERT_EQUAL_STRING("rec=89 len=6 min=18", findValue(msgs, n, "diag_reclen_err"));
+    TEST_ASSERT_EQUAL_STRING("rec=89 len=6 min=18 data=ab0000000000", findValue(msgs, n, "diag_reclen_err"));
     TEST_ASSERT_EQUAL_STRING("2", findValue(msgs, n, "diag_reclen_count"));
 }
 

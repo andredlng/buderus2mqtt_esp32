@@ -82,6 +82,16 @@ void setup() {
             mqtt.publish(msgs[i].key, msgs[i].value);
         }
     });
+    protocol.onDiscard([](const uint8_t* data, size_t len, size_t total,
+                          uint8_t recnum, uint8_t payofs, size_t expected_ofs) {
+        char val[256];
+        int pos = snprintf(val, sizeof(val), "next=%02x:%02x expected_ofs=%02x n=%u data=",
+                           recnum, payofs, (unsigned)expected_ofs, (unsigned)total);
+        for (size_t i = 0; i < len && pos + 3 <= (int)sizeof(val); i++) {
+            pos += snprintf(val + pos, sizeof(val) - pos, "%02x", data[i]);
+        }
+        mqtt.publish("diag_discard", val);
+    });
 
 #if ESP_IDF_VERSION_MAJOR >= 5
     esp_task_wdt_config_t wdt_cfg = { .timeout_ms = 30000, .idle_core_mask = 0, .trigger_panic = true };
