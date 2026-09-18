@@ -34,4 +34,5 @@ private:
     uint32_t run_config_ = 0;
     uint32_t run_energy_ = 0;
     uint32_t run_solar_ = 0;
+    uint32_t reclen_errors_ = 0;
 };

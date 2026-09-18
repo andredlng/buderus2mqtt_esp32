@@ -390,6 +390,43 @@ void test_solar_error_flags() {
     TEST_ASSERT_NOT_EQUAL(nullptr, strstr(err, "Collector Temp Limit"));
 }
 
+// --- Dispatch diagnostics ---
+
+void test_dispatch_reports_wrong_record_length() {
+    BuderusDecoder decoder;
+    uint8_t rec[30] = {};
+    MqttMessage msgs[16];
+
+    size_t n = decoder.dispatch(0x88, rec, 30, msgs, 16);
+    TEST_ASSERT_EQUAL(2, n);
+    TEST_ASSERT_EQUAL_STRING("rec=88 len=30 expected=42", findValue(msgs, n, "diag_reclen_err"));
+    TEST_ASSERT_EQUAL_STRING("1", findValue(msgs, n, "diag_reclen_count"));
+    TEST_ASSERT_FALSE(hasKey(msgs, n, "kessel"));
+
+    n = decoder.dispatch(0x89, rec, 6, msgs, 16);
+    TEST_ASSERT_EQUAL_STRING("rec=89 len=6 min=18", findValue(msgs, n, "diag_reclen_err"));
+    TEST_ASSERT_EQUAL_STRING("2", findValue(msgs, n, "diag_reclen_count"));
+}
+
+void test_dispatch_valid_record_has_no_diagnostics() {
+    BuderusDecoder decoder;
+    uint8_t rec[42] = {};
+    MqttMessage msgs[16];
+
+    size_t n = decoder.dispatch(0x88, rec, 42, msgs, 16);
+    TEST_ASSERT_TRUE(hasKey(msgs, n, "kessel"));
+    TEST_ASSERT_FALSE(hasKey(msgs, n, "diag_reclen_err"));
+}
+
+void test_dispatch_ignores_unknown_record() {
+    BuderusDecoder decoder;
+    uint8_t rec[3] = {};
+    MqttMessage msgs[16];
+
+    TEST_ASSERT_EQUAL(0, decoder.dispatch(0x87, rec, 3, msgs, 16));
+    TEST_ASSERT_EQUAL(0, decoder.dispatch(0x99, rec, 3, msgs, 16));
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
 
@@ -434,6 +471,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_solar_always_publishes);
     RUN_TEST(test_solar_short_record);
     RUN_TEST(test_solar_error_flags);
+
+    // Dispatch diagnostics
+    RUN_TEST(test_dispatch_reports_wrong_record_length);
+    RUN_TEST(test_dispatch_valid_record_has_no_diagnostics);
+    RUN_TEST(test_dispatch_ignores_unknown_record);
 
     return UNITY_END();
 }

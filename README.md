@@ -78,6 +78,8 @@ All values are published under `{mqtt_topic}/{key}`:
 | `sol_t2` | Solar tank 2 temperature |
 | `sol_pump` | Solar pump status |
 | `sol_err` | Solar error |
+| `diag_reclen_err` | Last record rejected for its length, e.g. `rec=88 len=30 expected=42` |
+| `diag_reclen_count` | Number of records rejected for their length since boot |
 
 ## Tests
 

@@ -29,7 +29,34 @@ size_t BuderusDecoder::addMsgFloat(MqttMessage* out, size_t idx, size_t max, con
     return idx + 1;
 }
 
+static int expectedRecLen(uint8_t recnum) {
+    if ((recnum >= 0x80 && recnum <= 0x83) || (recnum >= 0x8a && recnum <= 0x8e)) return 18;
+    switch (recnum) {
+        case 0x84: return 12;
+        case 0x88: return 42;
+        case 0x89: return -18;
+        case 0x9B: return 36;
+        case 0x9E: return -10;
+        default: return 0;
+    }
+}
+
 size_t BuderusDecoder::dispatch(uint8_t recnum, const uint8_t* data, size_t len, MqttMessage* out, size_t max_out) {
+    // Publish rejected records so framing problems are visible without a serial console.
+    int expected = expectedRecLen(recnum);
+    if (expected != 0 && !reclenCheck(expected, len)) {
+        reclen_errors_++;
+        char val[48];
+        snprintf(val, sizeof(val), "rec=%02x len=%u %s=%d",
+                 recnum, (unsigned)len, expected < 0 ? "min" : "expected", expected < 0 ? -expected : expected);
+        size_t n = 0;
+        n = addMsg(out, n, max_out, "diag_reclen_err", val);
+        char cnt[16];
+        snprintf(cnt, sizeof(cnt), "%u", (unsigned)reclen_errors_);
+        n = addMsg(out, n, max_out, "diag_reclen_count", cnt);
+        return n;
+    }
+
     // Zone records: 0x80-0x83 (zones 1-4), 0x8a-0x8e (zones 5-9)
     if (recnum >= 0x80 && recnum <= 0x83) {
         uint8_t zone = recnum - 0x80 + 1; // 1-4
