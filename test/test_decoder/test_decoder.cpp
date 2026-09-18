@@ -172,6 +172,24 @@ void test_water_error_flags() {
     TEST_ASSERT_NOT_EQUAL(nullptr, strstr(err, "Fehler bei Desinfektion"));
 }
 
+void test_water_external_error() {
+    uint8_t rec[12] = {};
+    rec[2] = 60; rec[3] = 55; rec[7] = 0x01;
+    MqttMessage msgs[16];
+
+    size_t n = BuderusDecoder::decodeWater(rec, 12, msgs, 16, 0);
+    TEST_ASSERT_EQUAL_STRING("Externe Fehlermeldung", findValue(msgs, n, "ww_err"));
+}
+
+void test_water_wf3_input_is_not_an_error() {
+    uint8_t rec[12] = {};
+    rec[2] = 60; rec[3] = 55; rec[6] = 0x02; // WF3-EIN
+    MqttMessage msgs[16];
+
+    size_t n = BuderusDecoder::decodeWater(rec, 12, msgs, 16, 0);
+    TEST_ASSERT_EQUAL_STRING("", findValue(msgs, n, "ww_err"));
+}
+
 // --- Boiler decoder tests ---
 
 void test_boiler_basic_publish() {
@@ -390,6 +408,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_water_basic_publish);
     RUN_TEST(test_water_odd_run_no_publish);
     RUN_TEST(test_water_error_flags);
+    RUN_TEST(test_water_external_error);
+    RUN_TEST(test_water_wf3_input_is_not_an_error);
 
     // Boiler tests
     RUN_TEST(test_boiler_basic_publish);

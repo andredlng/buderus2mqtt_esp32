@@ -137,7 +137,7 @@ size_t BuderusDecoder::decodeWater(const uint8_t* data, size_t len, MqttMessage*
     if (data[0] & 0x80) appendErr("Fehler in Inertanode");
     if (data[6] & 0x20) appendErr("Betriebsartschalter: AUS");
     if (data[6] & 0x40) appendErr("Betriebsartschalter: MANUELL");
-    if (data[6] & 0x02) appendErr("Externe Fehlermeldung");
+    if (data[7] & 0x01) appendErr("Externe Fehlermeldung");
 
     size_t n = 0;
     n = addMsgInt(out, n, max_out, "ww", wi);
